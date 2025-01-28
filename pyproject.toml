@@ -1,0 +1,17 @@
+[project]
+name = "scientific-python-utils"
+version = "0.1.0"
+description = "Scientific computing utilities shared across Open Forest Observatory Python projects"
+authors = [
+    {name = "David Russell",email = "djrussell@ucdavis.edu"}
+]
+license = {text = "GPL3"}
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
