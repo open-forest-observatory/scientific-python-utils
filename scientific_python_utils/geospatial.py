@@ -22,7 +22,7 @@ def ensure_projected_CRS(geodata: gpd.GeoDataFrame):
         geodata = geodata.to_crs(LAT_LON_CRS)
 
     # Convert geographic long-lat CRS to projected CRS
-    point = geodata["geometry"][0].centroid
+    point = geodata["geometry"].iloc[0].centroid
     geometric_crs = get_projected_CRS(lon=point.x, lat=point.y)
     return geodata.to_crs(geometric_crs)
 
