@@ -1,6 +1,19 @@
-import numpy as np
+import typing
+
 import geopandas as gpd
-from typing import Optional
+import matplotlib.pyplot as plt
+import numpy as np
+from geopandas import GeoDataFrame, GeoSeries
+from shapely import (
+    Geometry,
+    MultiPolygon,
+    Polygon,
+    difference,
+    intersection,
+    make_valid,
+    union,
+)
+from tqdm import tqdm
 
 
 def merge_classified_polygons(
@@ -119,3 +132,72 @@ def merge_classified_polygons(
     # Dissolve so there's only one (multi)polygon per class
     votes_per_class = votes_per_class.dissolve("max_class", as_index=False)
     return votes_per_class
+
+
+def ensure_non_overlapping_polygons(
+    geometries: typing.Union[typing.List[Geometry], gpd.GeoDataFrame],
+    inplace: bool = False,
+):
+    # Make sure geometries is a list of shapely objects
+    if isinstance(geometries, gpd.GeoDataFrame):
+        original_gdf = geometries
+        geometries = geometries.geometry.tolist()
+    else:
+        original_gdf = None
+
+    output_geometries = [None] * len(geometries)
+    union_of_added_geoms = MultiPolygon()
+
+    areas = [geom.area for geom in geometries]
+    sorted_inds = np.argsort(areas)
+
+    for ind in tqdm(sorted_inds):
+        # Get the input geometry and ensure it's valid
+        geom = make_valid(geometries[ind])
+        # Subtract the union of all
+        geom_to_add = difference(geom, union_of_added_geoms)
+        output_geometries[ind] = geom_to_add
+        # Add the original geom, not the difference'd one, to avoid boundary artifacts
+        union_of_added_geoms = union(geom, union_of_added_geoms)
+
+    if original_gdf is None:
+        return output_geometries
+    elif inplace:
+        original_gdf.geometry = output_geometries
+    else:
+        output_gdf = original_gdf.copy()
+        output_gdf.geometry = output_geometries
+        return output_gdf
+
+
+def find_union_of_intersections(list_of_multipolygons, crs, vis=False):
+    all_intersections = MultiPolygon()
+    for i, multipolygon_a in enumerate(list_of_multipolygons):
+        for multipolygon_b in list_of_multipolygons[:i]:
+            new_intersection = intersection(multipolygon_a, multipolygon_b)
+            all_intersections = union(all_intersections, new_intersection)
+    if vis:
+        geopandas_all_intersections = GeoDataFrame(
+            geometry=[all_intersections], crs=crs
+        )
+        geopandas_all_intersections.plot()
+        plt.show()
+    return all_intersections
+
+
+def intersects_union_of_polygons(
+    query_polygons: GeoDataFrame,
+    region_polygon: typing.Union[GeoDataFrame, GeoSeries, Polygon, MultiPolygon],
+):
+    if isinstance(region_polygon, GeoDataFrame):
+        region_polygon.plot()
+        # Try to make geometries valid
+        region_polygon.geometry = region_polygon.buffer(0)
+        region_polygon = region_polygon.dissolve()
+        region_polygon = region_polygon.geometry[0]
+
+    # Find the polygons that are within the bounds of the raster
+    intersection = query_polygons.intersection(region_polygon)
+    empty_geometry = intersection.is_empty.to_numpy()
+    within_bounds_IDs = np.where(np.logical_not(empty_geometry))[0]
+    return within_bounds_IDs
