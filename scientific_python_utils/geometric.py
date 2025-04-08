@@ -4,7 +4,9 @@ from typing import Optional
 
 
 def merge_classified_polygons(
-    classified_polygons: gpd.GeoDataFrame, class_column: str
+    classified_polygons: gpd.GeoDataFrame,
+    class_column: str,
+    print_tiebreaking_stats: bool = False,
 ) -> gpd.GeoDataFrame:
     """
     Take multiple potentially-overlapping polygons with associated class information and merge them
@@ -13,10 +15,10 @@ def merge_classified_polygons(
     * For any regions that have a non-tied number of votes, set the output class to the majority vote
     * For any regions with tied votes, break ties in favor of the less common class (based on un-ambigous regions)
 
-
     Args:
         classified_polygons (gpd.GeoDataFram): A geodataframe containing the `class_column` column
         class_column (str): The column to use as the class
+        print_tiebreaking_stats (bool, optional): Print the fraction of area that needed to be tiebroken
     """
     # Create a dictionary where the keys are the classes and the values are the dataframe with all
     # the (multi)polygons corresponding to that class
@@ -92,6 +94,14 @@ def merge_classified_polygons(
     # Order the classes from smallest area to largest, based on unambigous regions
     sorted_inds = (rows_with_one_class["area"]).argsort()
     sorted_classes = rows_with_one_class.index[sorted_inds].tolist()
+
+    if print_tiebreaking_stats:
+        area_of_sorted = rows_with_one_class.dissolve().area[0]
+        total_area = votes_per_class.dissolve().area[0]
+
+        print(
+            f"Ties had to be broken for {(100 *(1 - (area_of_sorted/total_area))):.1f}% of the total predictions"
+        )
 
     # Determine which classes (if any) have no non-overlapping regions. Add them to the start of the
     # list
