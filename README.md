@@ -1,0 +1,2 @@
+## Install
+First follow the instruction to install `geofileops` according to the instructions [here](https://geofileops.readthedocs.io/en/stable/installation.html#). Note that you may want to use a different conda environment name such as `spatial-utils`. Then install the additional depenedencies using `poetry install`.
