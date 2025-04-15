@@ -43,7 +43,7 @@ def geofileops_overlay(
     return overlay_data
 
 
-def geofileops_dissolve(df, groupby_columns=None):
+def geofileops_dissolve(df, groupby_columns=None, retain_all_columns=True):
     # Create a temporary folder to save intermediate results on disk to
     temp_folder = tempfile.TemporaryDirectory()
     input_path = Path(temp_folder.name, "input.gpkg")
@@ -51,12 +51,33 @@ def geofileops_dissolve(df, groupby_columns=None):
 
     # Write the input data to disk
     df.to_file(input_path)
+
+    # Similar to a geopandas dissolve, the minimum value across all aggregated rows is kept after
+    # dissolving
+    if retain_all_columns:
+        # Default, no columns provided
+        if groupby_columns is None:
+            groupby_columns_list = []
+        # Only one column is provided
+        elif not isinstance(groupby_columns, (list, tuple)):
+            groupby_columns_list = [groupby_columns]
+        else:
+            groupby_columns_list = groupby_columns
+
+        agg_columns = list(set(df.columns) - set(groupby_columns_list + ["geometry"]))
+        agg_columns = {
+            "columns": [{"column": c, "as": c, "agg": "min"} for c in agg_columns]
+        }
+    else:
+        agg_columns = None
+
     # Dissolve
     gfo.dissolve(
         input_path=input_path,
         output_path=output_path,
         explodecollections=False,
         groupby_columns=groupby_columns,
+        agg_columns=agg_columns,
     )
 
     # Read the result and return
