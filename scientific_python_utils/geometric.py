@@ -85,7 +85,7 @@ def geofileops_dissolve(df, groupby_columns=None, retain_all_columns=True):
     return dissolved
 
 
-def merge_classified_polygons(
+def merge_classified_polygons_by_voting(
     classified_polygons: gpd.GeoDataFrame,
     class_column: str,
     print_tiebreaking_stats: bool = False,
@@ -101,6 +101,11 @@ def merge_classified_polygons(
         classified_polygons (gpd.GeoDataFram): A geodataframe containing the `class_column` column
         class_column (str): The column to use as the class
         print_tiebreaking_stats (bool, optional): Print the fraction of area that needed to be tiebroken
+
+    Returns:
+        gpd.GeoDataFrame:
+            A dataframe with only the `class_column` column representing the merged class
+
     """
     # Create a dictionary where the keys are the classes and the values are the dataframe with all
     # the (multi)polygons corresponding to that class
@@ -202,10 +207,10 @@ def merge_classified_polygons(
     # the class that had the least area in the unambigious region.
     max_class = votes_per_class[sorted_classes].idxmax(axis=1)
     # Create a new column for the max class
-    votes_per_class["max_class"] = max_class
-    votes_per_class = votes_per_class[["max_class", "geometry"]]
+    votes_per_class[class_column] = max_class
+    votes_per_class = votes_per_class[[class_column, "geometry"]]
     # Dissolve so there's only one (multi)polygon per class
-    votes_per_class = geofileops_dissolve(votes_per_class, groupby_columns="max_class")
+    votes_per_class = geofileops_dissolve(votes_per_class, groupby_columns=class_column)
     return votes_per_class
 
 
