@@ -109,7 +109,9 @@ def geofileops_dissolve(
         else:
             groupby_columns_list = groupby_columns
 
-        agg_columns = list(set(gdf.columns) - set(groupby_columns_list + ["geometry"]))
+        agg_columns = list(
+            set(input_gdf.columns) - set(groupby_columns_list + ["geometry"])
+        )
         agg_columns = {
             "columns": [{"column": c, "as": c, "agg": "min"} for c in agg_columns]
         }
