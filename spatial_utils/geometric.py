@@ -1,10 +1,9 @@
+import tempfile
 import typing
 from pathlib import Path
-import tempfile
-from spatial_utils.geospatial import match_crs
 
-import geopandas as gpd
 import geofileops as gfo
+import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 from geopandas import GeoDataFrame, GeoSeries
@@ -18,6 +17,8 @@ from shapely import (
     union,
 )
 from tqdm import tqdm
+
+from spatial_utils.geospatial import match_crs
 
 
 def geofileops_overlay(
