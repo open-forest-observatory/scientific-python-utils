@@ -1,6 +1,7 @@
 import typing
 from pathlib import Path
 import tempfile
+from scientific_python_utils.geospatial import match_crs
 
 import geopandas as gpd
 import geofileops as gfo
@@ -28,7 +29,9 @@ def geofileops_overlay(
     """Perform an operation similar to geopandas.overlay(how="union")
 
     Args:
-        left_gdf (gpd.GeoDataFrame): First object to union
+        left_gdf (gpd.GeoDataFrame):
+            First object to union. Note that the right_gdf will be transformed to this CRS if the
+            two CRS do not match.
         right_gdf (gpd.GeoDataFrame): Second object to union
         input1_columns_prefix (str, optional):
             Prefix to add to columns in the last dataframe. Note that this is applied to all columns,
@@ -37,7 +40,7 @@ def geofileops_overlay(
         input2_columns_prefix (str, optional): See `input1_columns_prefix`. Defaults to "l2_".
 
     Returns:
-        gpd.GeoDataFrame: The overlaid data
+        gpd.GeoDataFrame: The overlaid data in the CRS of the first dataframe.
     """
     # Create a temporary folder to write data to disk since geofileops only works with on-disk
     # objects. Once it goes out of scope all the contents will be deleted from disk.
@@ -45,6 +48,9 @@ def geofileops_overlay(
     left_df_file = str(Path(temp_folder.name, "left.gpkg"))
     right_df_file = str(Path(temp_folder.name, "right.gpkg"))
     union_file = str(Path(temp_folder.name, "union.gpkg"))
+
+    # Make the CRS match between the two datasets or error if impossible
+    right_gdf = match_crs(target_gdf=left_gdf, updateable_gdf=right_gdf)
 
     # Write data to disk
     left_gdf.to_file(left_df_file)
