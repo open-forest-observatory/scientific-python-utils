@@ -8,6 +8,26 @@ import geopandas as gpd
 from spatial_utils.geospatial import match_crs
 
 
+def geofileops_clip(
+    input_gdf: gpd.GeoDataFrame, clip_geometry: typing.Union[gpd.GeoDataFrame]
+) -> gpd.GeoDataFrame:
+    # Create a temporary folder to write data to disk since geofileops only works with on-disk
+    # objects. Once it goes out of scope all the contents will be deleted from disk.
+    temp_folder = tempfile.TemporaryDirectory()
+    input_path = str(Path(temp_folder.name, "input.gpkg"))
+    output_path = str(Path(temp_folder.name, "output.gpkg"))
+    clip_path = str(Path(temp_folder.name, "clip.gpkg"))
+
+    input_gdf.to_file(input_path)
+    # TODO better handle other datatypes
+    clip_geometry.to_file(clip_path)
+
+    gfo.clip(input_path=input_path, output_path=output_path, clip_path=clip_path)
+
+    clipped = gpd.read_file(clip_path)
+    return clipped
+
+
 def geofileops_overlay(
     left_gdf: gpd.GeoDataFrame,
     right_gdf: gpd.GeoDataFrame,
