@@ -1,7 +1,7 @@
 import typing
 from pathlib import Path
 import tempfile
-from scientific_python_utils.geospatial import match_crs
+from spatial_utils.geospatial import match_crs
 
 import geopandas as gpd
 import geofileops as gfo

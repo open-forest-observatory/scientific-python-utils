@@ -1,7 +1,7 @@
 [project]
-name = "scientific-python-utils"
+name = "spatial-utils"
 version = "0.1.0"
-description = "Scientific computing utilities shared across Open Forest Observatory Python projects"
+description = "Spatial and geospatial utilities shared across Open Forest Observatory Python projects"
 authors = [
     {name = "David Russell",email = "djrussell@ucdavis.edu"}
 ]

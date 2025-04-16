@@ -1,7 +1,7 @@
 import geopandas as gpd
 import pyproj
 
-from scientific_python_utils.constants import LAT_LON_CRS
+from spatial_utils.constants import LAT_LON_CRS
 
 
 def match_crs(
