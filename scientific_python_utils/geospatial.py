@@ -3,6 +3,37 @@ import pyproj
 
 from scientific_python_utils.constants import LAT_LON_CRS
 
+
+def match_crs(
+    target_gdf: gpd.GeoDataFrame, updateable_gdf: gpd.GeoDataFrame
+) -> gpd.GeoDataFrame:
+    """Make sure the CRS of the two geodataframes match by projecting the second one
+
+    Args:
+        target_gdf (gpd.GeoDataFrame): The data from which the CRS is obtained
+        updateable_gdf (gpd.GeoDataFrame): The data to be projected
+
+    Raises:
+        ValueError: If the data cannot be projected
+
+    Returns:
+        gpd.GeoDataFrame: The data contained in `updatedable_gdf` projected to the CRS of `target_gdf`
+    """
+    target_crs = target_gdf.crs
+    updatable_crs = updateable_gdf.crs
+
+    if target_crs is None and updatable_crs is not None:
+        raise ValueError("Target CRS is None while the updateable CRS is not")
+
+    # If the CRS don't match, transform the updatable one
+    if target_crs != updatable_crs:
+        updateable_gdf = updateable_gdf.to_crs(target_crs)
+
+    # TODO think about how to handle if both are None - do nothing?
+    # TODO consider whether a copy should be returned in the case where no update is made
+    return updateable_gdf
+
+
 def ensure_projected_CRS(geodata: gpd.GeoDataFrame):
     """Returns a projected geodataframe from the provided geodataframe by converting it to
     ESPG:4326 (if not already) and determining the projected CRS from the point

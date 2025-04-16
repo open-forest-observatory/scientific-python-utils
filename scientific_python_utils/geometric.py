@@ -1,6 +1,10 @@
 import typing
+from pathlib import Path
+import tempfile
+from scientific_python_utils.geospatial import match_crs
 
 import geopandas as gpd
+import geofileops as gfo
 import matplotlib.pyplot as plt
 import numpy as np
 from geopandas import GeoDataFrame, GeoSeries
@@ -16,7 +20,118 @@ from shapely import (
 from tqdm import tqdm
 
 
-def merge_classified_polygons(
+def geofileops_overlay(
+    left_gdf: gpd.GeoDataFrame,
+    right_gdf: gpd.GeoDataFrame,
+    input1_columns_prefix: str = "l1_",
+    input2_columns_prefix: str = "l2_",
+) -> gpd.GeoDataFrame:
+    """Perform an operation similar to geopandas.overlay(how="union")
+
+    Args:
+        left_gdf (gpd.GeoDataFrame):
+            First object to union. Note that the right_gdf will be transformed to this CRS if the
+            two CRS do not match.
+        right_gdf (gpd.GeoDataFrame): Second object to union
+        input1_columns_prefix (str, optional):
+            Prefix to add to columns in the last dataframe. Note that this is applied to all columns,
+            not just ones that colide between the two dataframes, which differs from native
+            geopandas. Defaults to "l1_".
+        input2_columns_prefix (str, optional): See `input1_columns_prefix`. Defaults to "l2_".
+
+    Returns:
+        gpd.GeoDataFrame: The overlaid data in the CRS of the first dataframe.
+    """
+    # Create a temporary folder to write data to disk since geofileops only works with on-disk
+    # objects. Once it goes out of scope all the contents will be deleted from disk.
+    temp_folder = tempfile.TemporaryDirectory()
+    left_df_file = str(Path(temp_folder.name, "left.gpkg"))
+    right_df_file = str(Path(temp_folder.name, "right.gpkg"))
+    union_file = str(Path(temp_folder.name, "union.gpkg"))
+
+    # Make the CRS match between the two datasets or error if impossible
+    right_gdf = match_crs(target_gdf=left_gdf, updateable_gdf=right_gdf)
+
+    # Write data to disk
+    left_gdf.to_file(left_df_file)
+    right_gdf.to_file(right_df_file)
+
+    # This performs the same operation as geopandas overlay(how="union")
+    gfo.union(
+        input1_path=left_df_file,
+        input2_path=right_df_file,
+        output_path=union_file,
+        input1_columns_prefix=input1_columns_prefix,
+        input2_columns_prefix=input2_columns_prefix,
+    )
+    # Read the result back in
+    overlay_data = gpd.read_file(union_file)
+
+    return overlay_data
+
+
+def geofileops_dissolve(
+    input_gdf: gpd.GeoDataFrame,
+    groupby_columns: typing.Optional[typing.Union[str, typing.List[str]]] = None,
+    retain_all_columns: bool = True,
+) -> gpd.GeoDataFrame:
+    """Perform an operation similar to a geopandas.dissolve
+
+    Args:
+        input_gdf (gpd.GeoDataFrame): Input data
+        groupby_columns (typing.Optional[typing.Union[str, typing.List[str]]], optional):
+            Column or columns to dissolve by. If not specified, all data will be merged. Defaults to None.
+        retain_all_columns (bool, optional):
+            Should the data from columns which are not dissolved on be retained. Defaults to True.
+
+    Returns:
+        gpd.GeoDataFrame: Dissolved dataframe
+    """
+    # Create a temporary folder to write data to disk since geofileops only works with on-disk
+    # objects. Once it goes out of scope all the contents will be deleted from disk.
+    temp_folder = tempfile.TemporaryDirectory()
+    input_path = Path(temp_folder.name, "input.gpkg")
+    output_path = Path(temp_folder.name, "output.gpkg")
+
+    # Write the input data to disk
+    input_gdf.to_file(input_path)
+
+    if retain_all_columns:
+        # Similar to a geopandas dissolve, the minimum value across all aggregated rows is kept after
+        # dissolving
+
+        # Default, no columns provided
+        if groupby_columns is None:
+            groupby_columns_list = []
+        # Only one column is provided
+        elif not isinstance(groupby_columns, (list, tuple)):
+            groupby_columns_list = [groupby_columns]
+        else:
+            groupby_columns_list = groupby_columns
+
+        agg_columns = list(set(gdf.columns) - set(groupby_columns_list + ["geometry"]))
+        agg_columns = {
+            "columns": [{"column": c, "as": c, "agg": "min"} for c in agg_columns]
+        }
+    else:
+        # All columns except for the ones that are being aggregated by will be dropped
+        agg_columns = None
+
+    # Dissolve
+    gfo.dissolve(
+        input_path=input_path,
+        output_path=output_path,
+        explodecollections=False,
+        groupby_columns=groupby_columns,
+        agg_columns=agg_columns,
+    )
+
+    # Read the result and return
+    dissolved = gpd.read_file(output_path)
+    return dissolved
+
+
+def merge_classified_polygons_by_voting(
     classified_polygons: gpd.GeoDataFrame,
     class_column: str,
     print_tiebreaking_stats: bool = False,
@@ -32,6 +147,11 @@ def merge_classified_polygons(
         classified_polygons (gpd.GeoDataFram): A geodataframe containing the `class_column` column
         class_column (str): The column to use as the class
         print_tiebreaking_stats (bool, optional): Print the fraction of area that needed to be tiebroken
+
+    Returns:
+        gpd.GeoDataFrame:
+            A dataframe with only the `class_column` column representing the merged class
+
     """
     # Create a dictionary where the keys are the classes and the values are the dataframe with all
     # the (multi)polygons corresponding to that class
@@ -54,39 +174,43 @@ def merge_classified_polygons(
         for i in range(1, len(geometries_per_class)):
             geometry = geometries_per_class[i : i + 1]
             # Overlay the running total of overlaps with the new geometry
-            n_overlapping = gpd.overlay(n_overlapping, geometry, how="union")
+            n_overlapping = geofileops_overlay(n_overlapping, geometry)
             # Since we use the union approach, there will be some nan values for counts where one
             # side of the overlay did not overlap the other one. Set these to zero.
             n_overlapping.fillna(0, inplace=True)
             # Add the counts from the left and right dataframe and set them to a new "counts" column
             n_overlapping["counts"] = (
-                n_overlapping["counts_1"] + n_overlapping["counts_2"]
+                n_overlapping["l1_counts"] + n_overlapping["l2_counts"]
             )
             # Since we'll be repeating this process, it's important to drop these columns or there
             # will be a name collision on the next iteration
-            n_overlapping.drop(["counts_1", "counts_2"], axis=1, inplace=True)
+            n_overlapping.drop(["l1_counts", "l2_counts"], axis=1, inplace=True)
 
         # TODO, consider whether it would be more efficient to dissolve after every operation. It
         # would be an additional step, but it could speed up the overlay
-        n_overlapping = n_overlapping.dissolve("counts", as_index=False)
+        n_overlapping = geofileops_dissolve(n_overlapping, groupby_columns="counts")
         # Rename the counts column to the name of the class
-        n_overlapping.rename(columns={"counts": cls}, inplace=True)
+        n_overlapping.rename(columns={"counts": str(cls)}, inplace=True)
         # Append to the running list
         n_overlapping_per_class.append(n_overlapping)
 
     # Overlay the votes for each class to get all the regions with distinct combinations of votes
     votes_per_class = n_overlapping_per_class[0]
     for single_class_overlay in n_overlapping_per_class[1:]:
-        votes_per_class = gpd.overlay(
-            votes_per_class, single_class_overlay, how="union"
+        votes_per_class = geofileops_overlay(
+            votes_per_class,
+            single_class_overlay,
+            input1_columns_prefix="",
+            input2_columns_prefix="",
         )
 
     # Similar to before, since we're doing a "union" overlay, there will be rows that don't have
     # values for all columns. Fill them in with zero.
     votes_per_class.fillna(0, inplace=True)
 
+    unique_classes_as_strs = [str(x) for x in unique_classes]
     # Extract the counts columns to a numpy array and find the most common class per row
-    class_counts_matrix = votes_per_class[unique_classes].values
+    class_counts_matrix = votes_per_class[unique_classes_as_strs].values
     max_class_counts = np.max(class_counts_matrix, axis=1, keepdims=True)
 
     # Find rows where one class has the most votes (there are no ties)
@@ -95,22 +219,24 @@ def merge_classified_polygons(
     # Extract rows where one class has the most votes
     rows_with_one_class = votes_per_class.iloc[one_max_class]
     # Label them with the max class
-    rows_with_one_class["max_class"] = rows_with_one_class[unique_classes].idxmax(
-        axis=1
-    )
+    rows_with_one_class["max_class"] = rows_with_one_class[
+        unique_classes_as_strs
+    ].idxmax(axis=1)
     # Dissolve all polygons so we have one (multi)polygon per class
-    rows_with_one_class = rows_with_one_class.dissolve("max_class", as_index=False)
+    rows_with_one_class = geofileops_dissolve(
+        rows_with_one_class, groupby_columns="max_class"
+    )
 
     # Compute the area of each
     rows_with_one_class["area"] = rows_with_one_class.area
 
     # Order the classes from smallest area to largest, based on unambigous regions
     sorted_inds = (rows_with_one_class["area"]).argsort()
-    sorted_classes = rows_with_one_class.index[sorted_inds].tolist()
+    sorted_classes = rows_with_one_class["max_class"][sorted_inds].tolist()
 
     if print_tiebreaking_stats:
-        area_of_sorted = rows_with_one_class.dissolve().area[0]
-        total_area = votes_per_class.dissolve().area[0]
+        area_of_sorted = geofileops_dissolve(rows_with_one_class).area[0]
+        total_area = geofileops_dissolve(votes_per_class).area[0]
 
         print(
             f"Ties had to be broken for {(100 *(1 - (area_of_sorted/total_area))):.1f}% of the total predictions"
@@ -118,7 +244,7 @@ def merge_classified_polygons(
 
     # Determine which classes (if any) have no non-overlapping regions. Add them to the start of the
     # list
-    zero_area_classes = [c for c in unique_classes if c not in sorted_classes]
+    zero_area_classes = [c for c in unique_classes_as_strs if c not in sorted_classes]
     # Prepend the classes to the beginning of the list of sorted classes
     sorted_classes = zero_area_classes + sorted_classes
 
@@ -127,10 +253,10 @@ def merge_classified_polygons(
     # the class that had the least area in the unambigious region.
     max_class = votes_per_class[sorted_classes].idxmax(axis=1)
     # Create a new column for the max class
-    votes_per_class["max_class"] = max_class
-    votes_per_class = votes_per_class[["max_class", "geometry"]]
+    votes_per_class[class_column] = max_class
+    votes_per_class = votes_per_class[[class_column, "geometry"]]
     # Dissolve so there's only one (multi)polygon per class
-    votes_per_class = votes_per_class.dissolve("max_class", as_index=False)
+    votes_per_class = geofileops_dissolve(votes_per_class, groupby_columns=class_column)
     return votes_per_class
 
 
