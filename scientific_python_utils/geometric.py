@@ -20,15 +20,35 @@ from tqdm import tqdm
 
 
 def geofileops_overlay(
-    left_df, right_df, input1_columns_prefix="l1_", input2_columns_prefix="l2_"
-):
+    left_gdf: gpd.GeoDataFrame,
+    right_gdf: gpd.GeoDataFrame,
+    input1_columns_prefix: str = "l1_",
+    input2_columns_prefix: str = "l2_",
+) -> gpd.GeoDataFrame:
+    """Perform an operation similar to geopandas.overlay(how="union")
+
+    Args:
+        left_gdf (gpd.GeoDataFrame): First object to union
+        right_gdf (gpd.GeoDataFrame): Second object to union
+        input1_columns_prefix (str, optional):
+            Prefix to add to columns in the last dataframe. Note that this is applied to all columns,
+            not just ones that colide between the two dataframes, which differs from native
+            geopandas. Defaults to "l1_".
+        input2_columns_prefix (str, optional): See `input1_columns_prefix`. Defaults to "l2_".
+
+    Returns:
+        gpd.GeoDataFrame: The overlaid data
+    """
+    # Create a temporary folder to write data to disk since geofileops only works with on-disk
+    # objects. Once it goes out of scope all the contents will be deleted from disk.
     temp_folder = tempfile.TemporaryDirectory()
     left_df_file = str(Path(temp_folder.name, "left.gpkg"))
     right_df_file = str(Path(temp_folder.name, "right.gpkg"))
     union_file = str(Path(temp_folder.name, "union.gpkg"))
 
-    left_df.to_file(left_df_file)
-    right_df.to_file(right_df_file)
+    # Write data to disk
+    left_gdf.to_file(left_df_file)
+    right_gdf.to_file(right_df_file)
 
     # This performs the same operation as geopandas overlay(how="union")
     gfo.union(
@@ -38,23 +58,42 @@ def geofileops_overlay(
         input1_columns_prefix=input1_columns_prefix,
         input2_columns_prefix=input2_columns_prefix,
     )
+    # Read the result back in
     overlay_data = gpd.read_file(union_file)
 
     return overlay_data
 
 
-def geofileops_dissolve(df, groupby_columns=None, retain_all_columns=True):
-    # Create a temporary folder to save intermediate results on disk to
+def geofileops_dissolve(
+    input_gdf: gpd.GeoDataFrame,
+    groupby_columns: typing.Optional[typing.Union[str, typing.List[str]]] = None,
+    retain_all_columns: bool = True,
+) -> gpd.GeoDataFrame:
+    """Perform an operation similar to a geopandas.dissolve
+
+    Args:
+        input_gdf (gpd.GeoDataFrame): Input data
+        groupby_columns (typing.Optional[typing.Union[str, typing.List[str]]], optional):
+            Column or columns to dissolve by. If not specified, all data will be merged. Defaults to None.
+        retain_all_columns (bool, optional):
+            Should the data from columns which are not dissolved on be retained. Defaults to True.
+
+    Returns:
+        gpd.GeoDataFrame: Dissolved dataframe
+    """
+    # Create a temporary folder to write data to disk since geofileops only works with on-disk
+    # objects. Once it goes out of scope all the contents will be deleted from disk.
     temp_folder = tempfile.TemporaryDirectory()
     input_path = Path(temp_folder.name, "input.gpkg")
     output_path = Path(temp_folder.name, "output.gpkg")
 
     # Write the input data to disk
-    df.to_file(input_path)
+    input_gdf.to_file(input_path)
 
-    # Similar to a geopandas dissolve, the minimum value across all aggregated rows is kept after
-    # dissolving
     if retain_all_columns:
+        # Similar to a geopandas dissolve, the minimum value across all aggregated rows is kept after
+        # dissolving
+
         # Default, no columns provided
         if groupby_columns is None:
             groupby_columns_list = []
@@ -64,11 +103,12 @@ def geofileops_dissolve(df, groupby_columns=None, retain_all_columns=True):
         else:
             groupby_columns_list = groupby_columns
 
-        agg_columns = list(set(df.columns) - set(groupby_columns_list + ["geometry"]))
+        agg_columns = list(set(gdf.columns) - set(groupby_columns_list + ["geometry"]))
         agg_columns = {
             "columns": [{"column": c, "as": c, "agg": "min"} for c in agg_columns]
         }
     else:
+        # All columns except for the ones that are being aggregated by will be dropped
         agg_columns = None
 
     # Dissolve
