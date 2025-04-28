@@ -1,8 +1,5 @@
-import tempfile
 import typing
-from pathlib import Path
 
-import geofileops as gfo
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -97,10 +94,9 @@ def merge_classified_polygons_by_voting(
     # Similar to before, since we're doing a "union" overlay, there will be rows that don't have
     # values for all columns. Fill them in with zero.
     votes_per_class.fillna(0, inplace=True)
-
-    unique_classes_as_strs = [str(x) for x in unique_classes]
     # Extract the counts columns to a numpy array and find the most common class per row
-    class_counts_matrix = votes_per_class[unique_classes_as_strs].values
+    unique_classes_str = [str(x) for x in unique_classes]
+    class_counts_matrix = votes_per_class[unique_classes_str].values
     max_class_counts = np.max(class_counts_matrix, axis=1, keepdims=True)
 
     # Find rows where one class has the most votes (there are no ties)
@@ -109,9 +105,9 @@ def merge_classified_polygons_by_voting(
     # Extract rows where one class has the most votes
     rows_with_one_class = votes_per_class.iloc[one_max_class]
     # Label them with the max class
-    rows_with_one_class["max_class"] = rows_with_one_class[
-        unique_classes_as_strs
-    ].idxmax(axis=1)
+    rows_with_one_class["max_class"] = rows_with_one_class[unique_classes_str].idxmax(
+        axis=1
+    )
     # Dissolve all polygons so we have one (multi)polygon per class
     rows_with_one_class = geofileops_dissolve(
         rows_with_one_class, groupby_columns="max_class"
@@ -134,7 +130,7 @@ def merge_classified_polygons_by_voting(
 
     # Determine which classes (if any) have no non-overlapping regions. Add them to the start of the
     # list
-    zero_area_classes = [c for c in unique_classes_as_strs if c not in sorted_classes]
+    zero_area_classes = [c for c in unique_classes_str if c not in sorted_classes]
     # Prepend the classes to the beginning of the list of sorted classes
     sorted_classes = zero_area_classes + sorted_classes
 
@@ -147,6 +143,17 @@ def merge_classified_polygons_by_voting(
     votes_per_class = votes_per_class[[class_column, "geometry"]]
     # Dissolve so there's only one (multi)polygon per class
     votes_per_class = geofileops_dissolve(votes_per_class, groupby_columns=class_column)
+
+    # Convert the class_column values back from the str representation to the original type
+    max_classes_str = votes_per_class[class_column].to_list()
+    # Get the index in the list of unique values
+    max_classes_index_in_unique = [unique_classes_str.index(c) for c in max_classes_str]
+    # The unique values are ordered the same for the string-typed and original type. Extract the
+    # corresponding value in the original type.
+    max_classes_original_type = [unique_classes[i] for i in max_classes_index_in_unique]
+    # Update the column
+    votes_per_class[class_column] = max_classes_original_type
+
     return votes_per_class
 
 
