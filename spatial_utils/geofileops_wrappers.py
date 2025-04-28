@@ -24,7 +24,7 @@ def geofileops_clip(
 
     gfo.clip(input_path=input_path, output_path=output_path, clip_path=clip_path)
 
-    clipped = gpd.read_file(clip_path)
+    clipped = gpd.read_file(output_path)
     return clipped
 
 
