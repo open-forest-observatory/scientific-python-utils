@@ -5,8 +5,7 @@ from pathlib import Path
 import geofileops as gfo
 import geopandas as gpd
 
-from spatial_utils.geospatial import match_crs
-from spatial_utils.geospatial import ensure_projected_CRS
+from spatial_utils.geospatial import ensure_projected_CRS, match_crs
 
 
 def get_temp_files(*file_names):
