@@ -6,17 +6,53 @@ import geofileops as gfo
 import geopandas as gpd
 
 from spatial_utils.geospatial import match_crs
+from spatial_utils.geospatial import ensure_projected_CRS
+
+
+def get_temp_files(*file_names):
+    # Create a temporary folder to write data to disk since geofileops only works with on-disk
+    # objects. Once it goes out of scope all the contents will be deleted from disk.
+    temp_folder = tempfile.TemporaryDirectory()
+    # Create a path for each of the filenames
+    temp_paths = [str(Path(temp_folder.name, file_name)) for file_name in file_names]
+
+    # The temp folder needs to be returned so it doesn't go out of scope immediately, since at that
+    # point the contents of the directory are deleted.
+    return [temp_folder] + temp_paths
+
+
+def geofileops_simplify(input_gdf, tolerence, convert_to_projected_CRS: bool = True):
+    # Get the temporary file paths
+    temp_folder, input_path, output_path = get_temp_files("input.gpkg", "output.gpkg")
+
+    inital_crs = input_gdf.crs
+    # If requested convert the data into a projected CRS (if not already)
+    if convert_to_projected_CRS:
+        input_gdf = ensure_projected_CRS(input_gdf)
+
+    # Write the data to disk
+    input_gdf.to_file(input_path)
+
+    gfo.simplify(
+        input_path=input_path,
+        output_path=output_path,
+        tolerance=tolerence,
+        force=True,
+    )
+
+    # Read the result back in
+    simplified = gpd.read_file(output_path)
+    # TODO check if this is a cheap operation if the current and requested CRS match
+    simplified.to_crs(inital_crs, inplace=True)
+    return simplified
 
 
 def geofileops_clip(
     input_gdf: gpd.GeoDataFrame, clip_geometry: typing.Union[gpd.GeoDataFrame]
 ) -> gpd.GeoDataFrame:
-    # Create a temporary folder to write data to disk since geofileops only works with on-disk
-    # objects. Once it goes out of scope all the contents will be deleted from disk.
-    temp_folder = tempfile.TemporaryDirectory()
-    input_path = str(Path(temp_folder.name, "input.gpkg"))
-    output_path = str(Path(temp_folder.name, "output.gpkg"))
-    clip_path = str(Path(temp_folder.name, "clip.gpkg"))
+    temp_folder, input_path, output_path, clip_path = get_temp_files(
+        "input.gpkg", "output.gpkg", "clip.gpkg"
+    )
 
     input_gdf.to_file(input_path)
     # TODO better handle other datatypes
@@ -50,12 +86,9 @@ def geofileops_overlay(
     Returns:
         gpd.GeoDataFrame: The overlaid data in the CRS of the first dataframe.
     """
-    # Create a temporary folder to write data to disk since geofileops only works with on-disk
-    # objects. Once it goes out of scope all the contents will be deleted from disk.
-    temp_folder = tempfile.TemporaryDirectory()
-    left_df_file = str(Path(temp_folder.name, "left.gpkg"))
-    right_df_file = str(Path(temp_folder.name, "right.gpkg"))
-    union_file = str(Path(temp_folder.name, "union.gpkg"))
+    temp_folder, left_df_file, right_df_file, union_file = get_temp_files(
+        "left.gpkg", "right.gpkg", "union.gpkg"
+    )
 
     # Make the CRS match between the two datasets or error if impossible
     right_gdf = match_crs(target_gdf=left_gdf, updateable_gdf=right_gdf)
@@ -97,9 +130,7 @@ def geofileops_dissolve(
     """
     # Create a temporary folder to write data to disk since geofileops only works with on-disk
     # objects. Once it goes out of scope all the contents will be deleted from disk.
-    temp_folder = tempfile.TemporaryDirectory()
-    input_path = Path(temp_folder.name, "input.gpkg")
-    output_path = Path(temp_folder.name, "output.gpkg")
+    temp_folder, input_path, output_path = get_temp_files("input.gpkg", "output.gpkg")
 
     # Write the input data to disk
     input_gdf.to_file(input_path)
