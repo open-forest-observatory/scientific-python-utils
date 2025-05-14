@@ -20,6 +20,32 @@ def get_temp_files(*file_names):
     return [temp_folder] + temp_paths
 
 
+def geofileops_buffer(input_gdf, distance, convert_to_projected_CRS=True):
+    temp_folder, input_path, output_path = get_temp_files("input.gpkg", "output.gpkg")
+
+    inital_crs = input_gdf.crs
+    # If requested convert the data into a projected CRS (if not already)
+    if convert_to_projected_CRS:
+        input_gdf = ensure_projected_CRS(input_gdf)
+
+    # Write the data to disk
+    input_gdf.to_file(input_path)
+
+    gfo.buffer(
+        input_path=input_path,
+        output_path=output_path,
+        distance=distance,
+        endcap_style=gfo.BufferEndCapStyle.FLAT,
+        join_style=gfo.BufferJoinStyle.MITRE,
+        force=True,
+    )
+
+    buffered = gpd.read_file(output_path)
+    # TODO check if this is a cheap operation if the current and requested CRS match
+    buffered.to_crs(inital_crs, inplace=True)
+    return buffered
+
+
 def geofileops_simplify(input_gdf, tolerence, convert_to_projected_CRS: bool = True):
     # Get the temporary file paths
     temp_folder, input_path, output_path = get_temp_files("input.gpkg", "output.gpkg")
