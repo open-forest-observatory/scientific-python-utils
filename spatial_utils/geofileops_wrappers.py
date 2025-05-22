@@ -4,6 +4,7 @@ from pathlib import Path
 
 import geofileops as gfo
 import geopandas as gpd
+import shapely
 
 from spatial_utils.geospatial import ensure_projected_CRS, match_crs
 
@@ -73,17 +74,26 @@ def geofileops_simplify(input_gdf, tolerence, convert_to_projected_CRS: bool = T
 
 
 def geofileops_clip(
-    input_gdf: gpd.GeoDataFrame, clip_geometry: typing.Union[gpd.GeoDataFrame]
+    input_gdf: gpd.GeoDataFrame,
+    clip_geometry: typing.Union[gpd.GeoDataFrame, shapely.Geometry],
 ) -> gpd.GeoDataFrame:
     temp_folder, input_path, output_path, clip_path = get_temp_files(
         "input.gpkg", "output.gpkg", "clip.gpkg"
     )
 
     input_gdf.to_file(input_path)
-    # TODO better handle other datatypes
-    clip_geometry.to_file(clip_path)
 
-    gfo.clip(input_path=input_path, output_path=output_path, clip_path=clip_path)
+    # Handle the fact that the clip geometry can be either a geodataframe or shapely geometry
+    if isinstance(clip_geometry, gpd.GeoDataFrame):
+        clip_geometry.to_file(clip_path)
+    elif isinstance(clip_geometry, shapely.Geometry):
+        gpd.GeoDataFrame(geometry=[clip_geometry]).to_file(clip_path)
+
+    gfo.clip(
+        input_path=input_path,
+        output_path=output_path,
+        clip_path=clip_path,
+    )
 
     clipped = gpd.read_file(output_path)
     return clipped
