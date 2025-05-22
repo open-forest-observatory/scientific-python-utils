@@ -1,4 +1,4 @@
-import typing
+from typing import Optional, List, Union
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -21,6 +21,7 @@ from spatial_utils.geofileops_wrappers import geofileops_dissolve, geofileops_ov
 def merge_classified_polygons_by_voting(
     classified_polygons: gpd.GeoDataFrame,
     class_column: str,
+    tiebreaking_class_order: Optional[List[str]] = None,
     print_tiebreaking_stats: bool = False,
 ) -> gpd.GeoDataFrame:
     """
@@ -28,11 +29,14 @@ def merge_classified_polygons_by_voting(
     into non-overlapping classified polygons using the following strategy.
     * For each location, compute the number of polygons that cast votes for each class
     * For any regions that have a non-tied number of votes, set the output class to the majority vote
-    * For any regions with tied votes, break ties in favor of the less common class (based on un-ambigous regions)
+    * For any regions with tied votes, break ties in the order specified in `tiebreaking_class_order`
+      if specified, or in favor of the less common class (based on un-ambigous regions)
 
     Args:
         classified_polygons (gpd.GeoDataFram): A geodataframe containing the `class_column` column
         class_column (str): The column to use as the class
+        tiebreaking_class_order (List[str], optional):
+            A list of ordered class names. Ties will be broken in favor of classes earlier in the list.
         print_tiebreaking_stats (bool, optional): Print the fraction of area that needed to be tiebroken
 
     Returns:
@@ -44,7 +48,6 @@ def merge_classified_polygons_by_voting(
     # the (multi)polygons corresponding to that class
     grouped_by_class = {k[0]: v for k, v in classified_polygons.groupby([class_column])}
     unique_classes = list(grouped_by_class.keys())
-
     # Now, for each individual class, compute how many overlapping polygons there are for each
     # location. This information will be used in future steps to prioritize that class if there are
     # multiple predictions for the same location.
@@ -80,17 +83,16 @@ def merge_classified_polygons_by_voting(
         n_overlapping.rename(columns={"counts": str(cls)}, inplace=True)
         # Append to the running list
         n_overlapping_per_class.append(n_overlapping)
-
+    print("Done with the n-overlapping steps")
     # Overlay the votes for each class to get all the regions with distinct combinations of votes
     votes_per_class = n_overlapping_per_class[0]
-    for single_class_overlay in n_overlapping_per_class[1:]:
+    for i, single_class_overlay in enumerate(n_overlapping_per_class[1:]):
         votes_per_class = geofileops_overlay(
             votes_per_class,
             single_class_overlay,
             input1_columns_prefix="",
             input2_columns_prefix="",
         )
-
     # Similar to before, since we're doing a "union" overlay, there will be rows that don't have
     # values for all columns. Fill them in with zero.
     votes_per_class.fillna(0, inplace=True)
@@ -116,9 +118,26 @@ def merge_classified_polygons_by_voting(
     # Compute the area of each
     rows_with_one_class["area"] = rows_with_one_class.area
 
-    # Order the classes from smallest area to largest, based on unambigous regions
-    sorted_inds = (rows_with_one_class["area"]).argsort()
-    sorted_classes = rows_with_one_class["max_class"][sorted_inds].tolist()
+    if tiebreaking_class_order is None:
+        # Order the classes from smallest area to largest, based on unambigous regions
+        sorted_inds = (rows_with_one_class["area"]).argsort()
+        tiebreaking_class_order = rows_with_one_class["max_class"][sorted_inds].tolist()
+
+        # Determine which classes (if any) have no non-overlapping regions. Add them to the start of the
+        # list
+        zero_area_classes = [
+            c for c in unique_classes_str if c not in tiebreaking_class_order
+        ]
+        # Prepend the classes to the beginning of the list of sorted classes
+        tiebreaking_class_order = zero_area_classes + tiebreaking_class_order
+    else:
+        breakpoint()
+        tiebreaking_class_order = list(
+            filter(
+                lambda x: x in votes_per_class.columns.to_list(),
+                tiebreaking_class_order,
+            )
+        )
 
     if print_tiebreaking_stats:
         area_of_sorted = geofileops_dissolve(rows_with_one_class).area[0]
@@ -128,16 +147,10 @@ def merge_classified_polygons_by_voting(
             f"Ties had to be broken for {(100 *(1 - (area_of_sorted/total_area))):.1f}% of the total predictions"
         )
 
-    # Determine which classes (if any) have no non-overlapping regions. Add them to the start of the
-    # list
-    zero_area_classes = [c for c in unique_classes_str if c not in sorted_classes]
-    # Prepend the classes to the beginning of the list of sorted classes
-    sorted_classes = zero_area_classes + sorted_classes
-
     # Reorder the columns starting with the rarest class. Then compute the index of the max value.
     # Since this returns the first instance of the maximum value, ties will be broken in favor of
     # the class that had the least area in the unambigious region.
-    max_class = votes_per_class[sorted_classes].idxmax(axis=1)
+    max_class = votes_per_class[tiebreaking_class_order].idxmax(axis=1)
     # Create a new column for the max class
     votes_per_class[class_column] = max_class
     votes_per_class = votes_per_class[[class_column, "geometry"]]
@@ -158,7 +171,7 @@ def merge_classified_polygons_by_voting(
 
 
 def ensure_non_overlapping_polygons(
-    geometries: typing.Union[typing.List[Geometry], gpd.GeoDataFrame],
+    geometries: Union[List[Geometry], gpd.GeoDataFrame],
     inplace: bool = False,
 ):
     # Make sure geometries is a list of shapely objects
@@ -210,7 +223,7 @@ def find_union_of_intersections(list_of_multipolygons, crs, vis=False):
 
 def intersects_union_of_polygons(
     query_polygons: GeoDataFrame,
-    region_polygon: typing.Union[GeoDataFrame, GeoSeries, Polygon, MultiPolygon],
+    region_polygon: Union[GeoDataFrame, GeoSeries, Polygon, MultiPolygon],
 ):
     if isinstance(region_polygon, GeoDataFrame):
         region_polygon.plot()
